@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import '../theme/app_theme.dart';
 import '../widgets/modern_components.dart';
+// import '../services/ia_service.dart'; // Removed - deprecated services replaced with Firebase AI
 import '../services/quiz_helper_service.dart';
-import '../services/performance_service.dart';
+// import '../services/firebase_ai_service.dart'; // Not directly used - accessed through QuizHelperService
 import 'package:shared_preferences/shared_preferences.dart';
-import 'quiz_snake.dart';
 
 class QuizAlternadoScreen extends StatefulWidget {
   final bool isOfflineMode;
@@ -25,6 +24,8 @@ class QuizAlternadoScreen extends StatefulWidget {
 
 class _QuizAlternadoScreenState extends State<QuizAlternadoScreen>
     with TickerProviderStateMixin {
+  // late MathTutorService tutorService; // Deprecated - replaced with FirebaseAIService
+
   // Estado do Quiz
   Map<String, dynamic>? perguntaAtual;
   String tipoAtual = '';
@@ -34,7 +35,7 @@ class _QuizAlternadoScreenState extends State<QuizAlternadoScreen>
   bool carregando = false;
   bool quizFinalizado = false;
   bool _useGemini = true;
-  final String _modeloOllama = 'llama2';
+  String _modeloOllama = 'llama2';
   bool _perguntaDoCache = false;
   final TextEditingController _respostaController = TextEditingController();
 
@@ -79,32 +80,20 @@ class _QuizAlternadoScreenState extends State<QuizAlternadoScreen>
   late AnimationController _snakeController;
   final int _initialSnakeLength = 10;
   int _currentSnakeLength = 10;
-  int _snakeClickCount = 0;
 
   // Inimigos (tipo Slither.io)
   final List<List<Offset>> _enemySnakes = [];
   final List<Offset> _enemyDirections = [];
   final List<Color> _enemyColors = [];
 
-  // Configurações do jogo - agora dinâmico
-  int _gridSize = 20;
+  // Configurações do jogo
+  final int _gridSize = 20;
   double _cellSize = 15;
 
   // Configurações visuais
   late String ano;
   late String topico;
   late String dificuldade;
-
-  // Sistema de dificuldade adaptiva
-  String _dificuldadeAdaptiva = 'fácil';
-
-  Future<String> _getDificuldadeAtual() async {
-    // Usar dificuldade adaptiva baseada na performance do usuário
-    _dificuldadeAdaptiva =
-        await PerformanceService.calcularDificuldadeAdaptiva();
-    return _dificuldadeAdaptiva;
-  }
-
   @override
   void initState() {
     super.initState();
@@ -118,16 +107,6 @@ class _QuizAlternadoScreenState extends State<QuizAlternadoScreen>
     _loadPreferences();
     _initializeQuiz();
     _respostaController.addListener(_onRespostaChanged);
-
-    // Inicializar dificuldade adaptiva
-    _initializeDificuldadeAdaptiva();
-  }
-
-  Future<void> _initializeDificuldadeAdaptiva() async {
-    _dificuldadeAdaptiva = await PerformanceService.obterDificuldadeAtual();
-    if (mounted) {
-      setState(() {});
-    }
   }
 
   void _onRespostaChanged() {
@@ -172,16 +151,14 @@ class _QuizAlternadoScreenState extends State<QuizAlternadoScreen>
       vsync: this,
     );
 
-    // Inicializar cobra com 10 segmentos no centro do grid
+    // Inicializar cobra com 10 segmentos
     _snakeSegments = [];
-    final centerX = _gridSize ~/ 2;
-    final centerY = _gridSize ~/ 2;
     for (int i = 0; i < _initialSnakeLength; i++) {
-      _snakeSegments.add(Offset(centerX - i.toDouble(), centerY.toDouble()));
+      _snakeSegments.add(Offset(10 - i.toDouble(), 10));
     }
 
-    // Posição inicial da comida (longe da cobra)
-    _foodPosition = Offset((centerX + 5).toDouble(), centerY.toDouble());
+    // Posição inicial da comida
+    _foodPosition = const Offset(15, 10);
 
     // Inicializar inimigos
     _initializeEnemies();
@@ -249,19 +226,16 @@ class _QuizAlternadoScreenState extends State<QuizAlternadoScreen>
     if (_snakeSegments.isEmpty) return;
 
     final head = _snakeSegments.first;
-    var newHead = head + _direction;
+    final newHead = head + _direction;
 
-    // Wrap-around nas bordas - a cobra pode atravessar para o lado oposto
-    if (newHead.dx < 0) {
-      newHead = Offset(_gridSize - 1, newHead.dy);
-    } else if (newHead.dx >= _gridSize) {
-      newHead = Offset(0, newHead.dy);
-    }
-
-    if (newHead.dy < 0) {
-      newHead = Offset(newHead.dx, _gridSize - 1);
-    } else if (newHead.dy >= _gridSize) {
-      newHead = Offset(newHead.dx, 0);
+    // Verificar colisão com as bordas (simples)
+    if (newHead.dx < 0 ||
+        newHead.dx >= _gridSize ||
+        newHead.dy < 0 ||
+        newHead.dy >= _gridSize) {
+      // Bater na parede - apenas muda direção aleatoriamente
+      _direction = _getRandomDirection();
+      return;
     }
 
     // Adicionar nova cabeça
@@ -295,19 +269,17 @@ class _QuizAlternadoScreenState extends State<QuizAlternadoScreen>
         newDirection = _getRandomDirection();
       }
 
-      var newHead = head + newDirection;
+      final newHead = head + newDirection;
 
-      // Wrap-around nas bordas para inimigos também
-      if (newHead.dx < 0) {
-        newHead = Offset(_gridSize - 1, newHead.dy);
-      } else if (newHead.dx >= _gridSize) {
-        newHead = Offset(0, newHead.dy);
-      }
-
-      if (newHead.dy < 0) {
-        newHead = Offset(newHead.dx, _gridSize - 1);
-      } else if (newHead.dy >= _gridSize) {
-        newHead = Offset(newHead.dx, 0);
+      // Verificar colisão com as bordas
+      if (newHead.dx < 0 ||
+          newHead.dx >= _gridSize ||
+          newHead.dy < 0 ||
+          newHead.dy >= _gridSize) {
+        // Mudar direção ao bater na parede
+        newDirection = _getRandomDirection();
+        _enemyDirections[i] = newDirection;
+        continue;
       }
 
       // Adicionar nova cabeça
@@ -353,25 +325,15 @@ class _QuizAlternadoScreenState extends State<QuizAlternadoScreen>
     }
   }
 
-  int _calculateGridSize(double availableWidth, double availableHeight) {
-    // Calcular grid size baseado no tamanho da tela
-    final minSize =
-        availableWidth < availableHeight ? availableWidth : availableHeight;
-
-    if (minSize > 400) {
-      return 25; // Tela grande - mais células
-    } else if (minSize > 300) {
-      return 20; // Tela média
-    } else {
-      return 15; // Tela pequena - menos células
-    }
-  }
-
   Future<void> _loadPreferences() async {
-    // Firebase AI é o único serviço disponível
+    final prefs = await SharedPreferences.getInstance();
+    final selectedAI = prefs.getString('selected_ai') ?? 'gemini';
+    final modeloOllama = prefs.getString('modelo_ollama') ?? 'llama2';
+
     if (mounted) {
       setState(() {
-        _useGemini = true; // Sempre usar Firebase AI
+        _useGemini = selectedAI == 'gemini';
+        _modeloOllama = modeloOllama;
         topico = widget.topico ?? 'números e operações';
         dificuldade = widget.dificuldade ?? 'fácil';
       });
@@ -379,21 +341,7 @@ class _QuizAlternadoScreenState extends State<QuizAlternadoScreen>
   }
 
   Future<void> _initializeQuiz() async {
-    final prefs = await SharedPreferences.getInstance();
-    final apiKey = prefs.getString('gemini_api_key');
-
-    if (_useGemini && (apiKey == null || apiKey.isEmpty)) {
-      if (mounted) {
-        setState(() {
-          carregando = false;
-        });
-      }
-      _showErrorDialog('API Key do Gemini não configurada');
-      return;
-    }
-
-    // Usar Firebase AI Service
-
+    // MathTutorService deprecated - using FirebaseAIService directly through QuizHelperService
     // Limpa fila de perguntas pré-carregadas
     _perguntasPreCarregadas.clear();
     _preCarregamentoAtivo = false;
@@ -443,12 +391,11 @@ class _QuizAlternadoScreenState extends State<QuizAlternadoScreen>
       debugPrint('Gerando primeira pergunta tipo: $tipoAtual');
       debugPrint('Tópico: $topico, Dificuldade: $dificuldade, Ano: $ano');
 
-      final dificuldadeAtual = await _getDificuldadeAtual();
       final pergunta = await QuizHelperService.gerarPerguntaInteligente(
         unidade: topico,
         ano: ano,
         tipoQuiz: tipoAtual,
-        dificuldade: dificuldadeAtual,
+        dificuldade: dificuldade,
       );
 
       if (pergunta != null) {
@@ -546,12 +493,11 @@ class _QuizAlternadoScreenState extends State<QuizAlternadoScreen>
       final tipo = _getTipoAtual();
       debugPrint('Pré-carregando pergunta tipo: $tipo');
 
-      final dificuldadeAtual = await _getDificuldadeAtual();
       final pergunta = await QuizHelperService.gerarPerguntaInteligente(
         unidade: topico,
         ano: ano,
         tipoQuiz: tipo,
-        dificuldade: dificuldadeAtual,
+        dificuldade: dificuldade,
       );
 
       if (pergunta != null && mounted) {
@@ -685,13 +631,6 @@ class _QuizAlternadoScreenState extends State<QuizAlternadoScreen>
       estatisticas['incorretas'] = estatisticas['incorretas']! + 1;
     }
 
-    // Registrar resposta no sistema de performance para ajustar dificuldade
-    await PerformanceService.registrarResposta(
-      acertou: acertou,
-      dificuldade: _dificuldadeAdaptiva,
-      tipoQuiz: tipoAtual,
-    );
-
     // Salva a resposta
     respostas.add({
       'pergunta': perguntaAtual!['pergunta'],
@@ -700,7 +639,6 @@ class _QuizAlternadoScreenState extends State<QuizAlternadoScreen>
       'resposta_correta': respostaCorreta,
       'acertou': acertou,
       'explicacao': perguntaAtual!['explicacao'] ?? '',
-      'dificuldade_usada': _dificuldadeAdaptiva,
     });
 
     if (mounted) {
@@ -817,14 +755,10 @@ class _QuizAlternadoScreenState extends State<QuizAlternadoScreen>
       preCarregadas = ' • ${_perguntasPreCarregadas.length} prontas';
     }
 
-    // Adiciona indicador de dificuldade adaptiva
-    String dificuldadeInfo =
-        ' • Dificuldade: ${_dificuldadeAdaptiva.toUpperCase()}';
-
     if (_useGemini) {
-      return '$progresso • $nivel$dificuldadeInfo • IA: Gemini$preCarregadas';
+      return '$progresso • $nivel • IA: Gemini$preCarregadas';
     } else {
-      return '$progresso • $nivel$dificuldadeInfo • IA: Ollama ($_modeloOllama)$preCarregadas';
+      return '$progresso • $nivel • IA: Ollama ($_modeloOllama)$preCarregadas';
     }
   }
 
@@ -1049,40 +983,6 @@ class _QuizAlternadoScreenState extends State<QuizAlternadoScreen>
                     ],
                   ),
                 ),
-                const SizedBox(width: 12),
-                Container(
-                  padding: EdgeInsets.symmetric(
-                    horizontal: isTablet ? 16 : 12,
-                    vertical: isTablet ? 8 : 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: _getDificuldadeColor(_dificuldadeAdaptiva)
-                        .withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(isTablet ? 12 : 8),
-                    border: Border.all(
-                      color: _getDificuldadeColor(_dificuldadeAdaptiva)
-                          .withValues(alpha: 0.3),
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        _getDificuldadeIcon(_dificuldadeAdaptiva),
-                        color: _getDificuldadeColor(_dificuldadeAdaptiva),
-                        size: isTablet ? 18 : 16,
-                      ),
-                      SizedBox(width: isTablet ? 8 : 6),
-                      Text(
-                        _dificuldadeAdaptiva.toUpperCase(),
-                        style: AppTheme.bodySmall.copyWith(
-                          color: _getDificuldadeColor(_dificuldadeAdaptiva),
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
               ],
             ),
             SizedBox(height: isTablet ? 24 : 20),
@@ -1232,7 +1132,7 @@ class _QuizAlternadoScreenState extends State<QuizAlternadoScreen>
                       ),
                       const SizedBox(height: 12),
                       Text(
-                        '• 10 perguntas de tipos variados\n• IA gera conteúdo personalizado\n• Dificuldade adaptativa baseada na performance\n• Pré-carregamento para experiência fluida',
+                        '• 10 perguntas de tipos variados\n• IA gera conteúdo personalizado\n• Pré-carregamento para experiência fluida',
                         style: AppTheme.bodySmall.copyWith(
                           color: AppTheme.darkTextSecondaryColor,
                           height: 1.4,
@@ -1285,15 +1185,6 @@ class _QuizAlternadoScreenState extends State<QuizAlternadoScreen>
   }
 
   Widget _buildTelaCarregamento() {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final isDesktop = screenWidth >= 1024;
-    final isTablet = screenWidth >= 768;
-
-    if (isDesktop) {
-      // Tela cheia apenas com o jogo para desktop
-      return _buildFullscreenSnakeGame();
-    }
-
     return Scaffold(
       backgroundColor: AppTheme.darkBackgroundColor,
       body: Container(
@@ -1345,439 +1236,202 @@ class _QuizAlternadoScreenState extends State<QuizAlternadoScreen>
                 ),
               ),
 
-              // Jogo da Cobrinha - Console ou interface simples baseado no tamanho da tela
+              // Jogo da Cobrinha
               Expanded(
-                child:
-                    isTablet ? _buildRetroConsole() : _buildSimpleSnakeGame(),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSimpleSnakeGame() {
-    return Container(
-      margin: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppTheme.darkSurfaceColor,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.darkBorderColor),
-      ),
-      child: Column(
-        children: [
-          // Título e contador
-          Container(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  Icons.games_rounded,
-                  color: AppTheme.primaryColor,
-                  size: 24,
-                ),
-                const SizedBox(width: 12),
-                Text(
-                  'Jogo da Cobrinha',
-                  style: AppTheme.bodyMedium.copyWith(
-                    color: AppTheme.darkTextPrimaryColor,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 6,
-                  ),
+                child: Container(
+                  margin: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: AppTheme.primaryColor.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(12),
+                    color: AppTheme.darkSurfaceColor,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: AppTheme.darkBorderColor),
                   ),
-                  child: Text(
-                    '${_snakeSegments.length} segmentos',
-                    style: AppTheme.bodySmall.copyWith(
-                      color: AppTheme.primaryColor,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          // Área do jogo com controles
-          Expanded(
-            child: Column(
-              children: [
-                // Área do jogo (usa LayoutBuilder para auto-redimensionamento)
-                Expanded(
-                  flex: 3,
-                  child: GestureDetector(
-                    onTap: () {
-                      if (mounted) {
-                        setState(() {
-                          _snakeClickCount++;
-                          if (_snakeClickCount >= 3) {
-                            Navigator.of(context).pushReplacement(
-                              MaterialPageRoute(
-                                builder: (context) => QuizSnakeScreen(
-                                  topico: widget.topico,
-                                  dificuldade: widget.dificuldade,
-                                ),
-                              ),
-                            );
-                          }
-                        });
-                      }
-                    },
-                    child: Container(
-                      margin: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Colors.black,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: LayoutBuilder(
-                        builder: (context, constraints) {
-                          // Calcular tamanho da célula baseado no espaço disponível
-                          final availableWidth = constraints.maxWidth;
-                          final availableHeight = constraints.maxHeight;
-                          _cellSize = (availableWidth < availableHeight
-                                  ? availableWidth
-                                  : availableHeight) /
-                              _gridSize;
-
-                          return CustomPaint(
-                            painter: SnakePainter(
-                              snakeSegments: _snakeSegments,
-                              foodPosition: _foodPosition,
-                              cellSize: _cellSize,
-                              enemySnakes: _enemySnakes,
-                              enemyColors: _enemyColors,
-                              gridSize: _gridSize,
-                            ),
-                            child: Container(),
-                          );
-                        },
-                      ),
-                    ),
-                  ),
-                ),
-
-                // Controles de toque
-                Container(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
                   child: Column(
                     children: [
-                      // Botão cima
-                      IconButton(
-                        onPressed: _moveUp,
-                        icon: Icon(
-                          Icons.keyboard_arrow_up,
-                          color: AppTheme.primaryColor,
-                          size: 32,
-                        ),
-                        style: IconButton.styleFrom(
-                          backgroundColor:
-                              AppTheme.primaryColor.withValues(alpha: 0.1),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-
-                      // Linha com esquerda, centro (vazio), direita
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          IconButton(
-                            onPressed: _moveLeft,
-                            icon: Icon(
-                              Icons.keyboard_arrow_left,
-                              color: AppTheme.primaryColor,
-                              size: 32,
-                            ),
-                            style: IconButton.styleFrom(
-                              backgroundColor:
-                                  AppTheme.primaryColor.withValues(alpha: 0.1),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 40), // Espaço vazio no centro
-                          IconButton(
-                            onPressed: _moveRight,
-                            icon: Icon(
-                              Icons.keyboard_arrow_right,
-                              color: AppTheme.primaryColor,
-                              size: 32,
-                            ),
-                            style: IconButton.styleFrom(
-                              backgroundColor:
-                                  AppTheme.primaryColor.withValues(alpha: 0.1),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-
-                      // Botão baixo
-                      IconButton(
-                        onPressed: _moveDown,
-                        icon: Icon(
-                          Icons.keyboard_arrow_down,
-                          color: AppTheme.primaryColor,
-                          size: 32,
-                        ),
-                        style: IconButton.styleFrom(
-                          backgroundColor:
-                              AppTheme.primaryColor.withValues(alpha: 0.1),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          // Status
-          Container(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              children: [
-                Text(
-                  'Gerando perguntas inteligentes...',
-                  style: AppTheme.bodyMedium.copyWith(
-                    color: AppTheme.darkTextSecondaryColor,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'A cobra diminui conforme as perguntas são criadas!',
-                  style: AppTheme.bodySmall.copyWith(
-                    color: AppTheme.darkTextSecondaryColor,
-                    fontStyle: FontStyle.italic,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildRetroConsole() {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final screenHeight = MediaQuery.of(context).size.height;
-
-    // Ajustar margens e aspect ratio baseado no tamanho da tela
-    final isLargeScreen = screenWidth > 1200;
-    final margin = isLargeScreen ? 40.0 : 24.0;
-    final aspectRatio = screenWidth > screenHeight ? 1.4 : 1.1;
-
-    return Container(
-      margin: EdgeInsets.all(margin),
-      child: AspectRatio(
-        aspectRatio: aspectRatio, // Responsivo baseado na orientação
-        child: Container(
-          decoration: BoxDecoration(
-            // Gradiente usando as cores do tema
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                AppTheme.darkSurfaceColor,
-                AppTheme.darkBackgroundColor,
-                AppTheme.darkSurfaceColor.withValues(alpha: 0.8),
-              ],
-            ),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: AppTheme.darkBorderColor, width: 2),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.4),
-                blurRadius: 20,
-                offset: const Offset(0, 10),
-              ),
-              BoxShadow(
-                color: AppTheme.primaryColor.withValues(alpha: 0.2),
-                blurRadius: 10,
-                offset: const Offset(0, 5),
-              ),
-            ],
-          ),
-          child: Column(
-            children: [
-              // Tela do jogo ocupando todo o espaço
-              Expanded(
-                flex: 6, // Aumentado ainda mais
-                child: Container(
-                  margin: const EdgeInsets.all(8), // Margem mínima apenas
-                  child: Container(
-                    decoration: BoxDecoration(
-                      // Tela com bordas do tema
-                      color: AppTheme.darkSurfaceColor.withValues(alpha: 0.3),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: AppTheme.darkBorderColor,
-                        width: 3,
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: AppTheme.darkBackgroundColor
-                              .withValues(alpha: 0.8),
-                          blurRadius: 8,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
-                    ),
-                    child: GestureDetector(
-                      onTap: () {
-                        if (mounted) {
-                          setState(() {
-                            _snakeClickCount++;
-                            if (_snakeClickCount >= 3) {
-                              Navigator.of(context).pushReplacement(
-                                MaterialPageRoute(
-                                  builder: (context) => QuizSnakeScreen(
-                                    topico: widget.topico,
-                                    dificuldade: widget.dificuldade,
-                                  ),
-                                ),
-                              );
-                            }
-                          });
-                        }
-                      },
-                      child: Container(
-                        margin:
-                            const EdgeInsets.all(4), // Margem interna mínima
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                            colors: [
-                              AppTheme.darkBackgroundColor,
-                              AppTheme.darkSurfaceColor.withValues(alpha: 0.3),
-                            ],
-                          ),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Stack(
-                          children: [
-                            // Efeito de tela retrô com brilho
-                            Container(
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(8),
-                                gradient: LinearGradient(
-                                  begin: Alignment.topLeft,
-                                  end: Alignment.bottomRight,
-                                  colors: [
-                                    AppTheme.primaryColor
-                                        .withValues(alpha: 0.08),
-                                    Colors.transparent,
-                                    AppTheme.primaryColor
-                                        .withValues(alpha: 0.04),
-                                  ],
-                                ),
-                              ),
-                            ),
-                            // Jogo da cobrinha
-                            LayoutBuilder(
-                              builder: (context, constraints) {
-                                final availableWidth = constraints.maxWidth;
-                                final availableHeight = constraints.maxHeight;
-                                _gridSize = _calculateGridSize(
-                                    availableWidth, availableHeight);
-                                _cellSize = (availableWidth < availableHeight
-                                        ? availableWidth
-                                        : availableHeight) /
-                                    _gridSize;
-
-                                return CustomPaint(
-                                  painter: SnakePainter(
-                                    snakeSegments: _snakeSegments,
-                                    foodPosition: _foodPosition,
-                                    cellSize: _cellSize,
-                                    enemySnakes: _enemySnakes,
-                                    enemyColors: _enemyColors,
-                                    gridSize: _gridSize,
-                                  ),
-                                  child: Container(),
-                                );
-                              },
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-
-              // Controles do console
-              Expanded(
-                flex: 1, // Reduzido de 2 para 1
-                child: Container(
-                  margin:
-                      const EdgeInsets.only(left: 20, right: 20, bottom: 20),
-                  child: Row(
-                    children: [
-                      // D-Pad (Esquerda)
-                      Expanded(
-                        child: _buildDPad(),
-                      ),
-
-                      // Área central com informações
-                      Expanded(
-                        flex: 2,
-                        child: Column(
+                      // Título e contador
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        child: Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            // Indicadores do console com pontuação
-                            Container(
-                              padding: const EdgeInsets.symmetric(vertical: 4),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  _buildConsoleLED(true),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    '${_snakeSegments.length}',
-                                    style: AppTheme.bodyMedium.copyWith(
-                                      color: AppTheme.primaryColor,
-                                      fontWeight: FontWeight.bold,
-                                      fontFamily: 'monospace',
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  _buildConsoleLED(false),
-                                ],
-                              ),
+                            Icon(
+                              Icons.games_rounded,
+                              color: AppTheme.primaryColor,
+                              size: 24,
                             ),
-                            const SizedBox(height: 4),
+                            const SizedBox(width: 12),
                             Text(
-                              'Gerando Quiz...',
+                              'Jogo da Cobrinha',
                               style: AppTheme.bodyMedium.copyWith(
                                 color: AppTheme.darkTextPrimaryColor,
                                 fontWeight: FontWeight.w600,
                               ),
                             ),
-                            const SizedBox(height: 4),
+                            const SizedBox(width: 16),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 6,
+                              ),
+                              decoration: BoxDecoration(
+                                color: AppTheme.primaryColor
+                                    .withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(
+                                '${_snakeSegments.length} segmentos',
+                                style: AppTheme.bodySmall.copyWith(
+                                  color: AppTheme.primaryColor,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      // Área do jogo com controles
+                      Expanded(
+                        child: Column(
+                          children: [
+                            // Área do jogo (usa LayoutBuilder para auto-redimensionamento)
+                            Expanded(
+                              flex: 3,
+                              child: Container(
+                                margin: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: Colors.black,
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: LayoutBuilder(
+                                  builder: (context, constraints) {
+                                    // Calcular tamanho da célula baseado no espaço disponível
+                                    final availableWidth = constraints.maxWidth;
+                                    final availableHeight =
+                                        constraints.maxHeight;
+                                    _cellSize =
+                                        (availableWidth < availableHeight
+                                                ? availableWidth
+                                                : availableHeight) /
+                                            _gridSize;
+
+                                    return CustomPaint(
+                                      painter: SnakePainter(
+                                        snakeSegments: _snakeSegments,
+                                        foodPosition: _foodPosition,
+                                        cellSize: _cellSize,
+                                        enemySnakes: _enemySnakes,
+                                        enemyColors: _enemyColors,
+                                        gridSize: _gridSize,
+                                      ),
+                                      child: Container(),
+                                    );
+                                  },
+                                ),
+                              ),
+                            ),
+
+                            // Controles de toque
+                            Container(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              child: Column(
+                                children: [
+                                  // Botão cima
+                                  IconButton(
+                                    onPressed: _moveUp,
+                                    icon: Icon(
+                                      Icons.keyboard_arrow_up,
+                                      color: AppTheme.primaryColor,
+                                      size: 32,
+                                    ),
+                                    style: IconButton.styleFrom(
+                                      backgroundColor: AppTheme.primaryColor
+                                          .withValues(alpha: 0.1),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+
+                                  // Linha com esquerda, centro (vazio), direita
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      IconButton(
+                                        onPressed: _moveLeft,
+                                        icon: Icon(
+                                          Icons.keyboard_arrow_left,
+                                          color: AppTheme.primaryColor,
+                                          size: 32,
+                                        ),
+                                        style: IconButton.styleFrom(
+                                          backgroundColor: AppTheme.primaryColor
+                                              .withValues(alpha: 0.1),
+                                          shape: RoundedRectangleBorder(
+                                            borderRadius:
+                                                BorderRadius.circular(8),
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(
+                                          width: 40), // Espaço vazio no centro
+                                      IconButton(
+                                        onPressed: _moveRight,
+                                        icon: Icon(
+                                          Icons.keyboard_arrow_right,
+                                          color: AppTheme.primaryColor,
+                                          size: 32,
+                                        ),
+                                        style: IconButton.styleFrom(
+                                          backgroundColor: AppTheme.primaryColor
+                                              .withValues(alpha: 0.1),
+                                          shape: RoundedRectangleBorder(
+                                            borderRadius:
+                                                BorderRadius.circular(8),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 4),
+
+                                  // Botão baixo
+                                  IconButton(
+                                    onPressed: _moveDown,
+                                    icon: Icon(
+                                      Icons.keyboard_arrow_down,
+                                      color: AppTheme.primaryColor,
+                                      size: 32,
+                                    ),
+                                    style: IconButton.styleFrom(
+                                      backgroundColor: AppTheme.primaryColor
+                                          .withValues(alpha: 0.1),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      // Status
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          children: [
                             Text(
-                              'Cobra diminui a cada pergunta!',
+                              'Gerando perguntas inteligentes...',
+                              style: AppTheme.bodyMedium.copyWith(
+                                color: AppTheme.darkTextSecondaryColor,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              'A cobra diminui conforme as perguntas são criadas!',
                               style: AppTheme.bodySmall.copyWith(
                                 color: AppTheme.darkTextSecondaryColor,
                                 fontStyle: FontStyle.italic,
@@ -1786,413 +1440,12 @@ class _QuizAlternadoScreenState extends State<QuizAlternadoScreen>
                           ],
                         ),
                       ),
-
-                      // Botões de ação (Direita)
-                      Expanded(
-                        child: _buildConsoleActionButtons(),
-                      ),
                     ],
                   ),
                 ),
               ),
             ],
           ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildConsoleLED(bool isOn) {
-    return Container(
-      width: 8,
-      height: 8,
-      decoration: BoxDecoration(
-        color: isOn ? Colors.greenAccent : Colors.red,
-        borderRadius: BorderRadius.circular(4),
-        boxShadow: isOn
-            ? [
-                BoxShadow(
-                  color: Colors.greenAccent.withValues(alpha: 0.6),
-                  blurRadius: 4,
-                  spreadRadius: 1,
-                ),
-              ]
-            : [
-                BoxShadow(
-                  color: Colors.red.withValues(alpha: 0.6),
-                  blurRadius: 4,
-                  spreadRadius: 1,
-                ),
-              ],
-      ),
-    );
-  }
-
-  Widget _buildDPad() {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final dPadSize =
-        screenWidth > 1200 ? 140.0 : 120.0; // Maior em telas grandes
-
-    return SizedBox(
-      width: dPadSize,
-      height: dPadSize,
-      child: Stack(
-        children: [
-          // Centro do D-Pad
-          Positioned(
-            left: dPadSize / 3,
-            top: dPadSize / 3,
-            child: Container(
-              width: dPadSize / 3,
-              height: dPadSize / 3,
-              decoration: BoxDecoration(
-                color: AppTheme.darkSurfaceColor,
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
-          ),
-          // Cima
-          Positioned(
-            left: dPadSize / 3,
-            top: 0,
-            child: _buildDPadButton(Icons.keyboard_arrow_up, _moveUp),
-          ),
-          // Baixo
-          Positioned(
-            left: dPadSize / 3,
-            bottom: 0,
-            child: _buildDPadButton(Icons.keyboard_arrow_down, _moveDown),
-          ),
-          // Esquerda
-          Positioned(
-            left: 0,
-            top: dPadSize / 3,
-            child: _buildDPadButton(Icons.keyboard_arrow_left, _moveLeft),
-          ),
-          // Direita
-          Positioned(
-            right: 0,
-            top: dPadSize / 3,
-            child: _buildDPadButton(Icons.keyboard_arrow_right, _moveRight),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDPadButton(IconData icon, VoidCallback onPressed) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final buttonSize =
-        screenWidth > 1200 ? 45.0 : 40.0; // Maior em telas grandes
-
-    return GestureDetector(
-      onTap: onPressed,
-      child: Container(
-        width: buttonSize,
-        height: buttonSize,
-        decoration: BoxDecoration(
-          color: AppTheme.darkSurfaceColor,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-            color: AppTheme.darkBorderColor,
-            width: 2,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.3),
-              blurRadius: 2,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Icon(
-          icon,
-          color: AppTheme.darkTextPrimaryColor,
-          size: 20,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildConsoleActionButtons() {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            _buildConsoleButton('A', Colors.blue),
-            const SizedBox(width: 12),
-            _buildConsoleButton('B', Colors.orange),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            _buildConsoleButton('X', Colors.purple),
-            const SizedBox(width: 12),
-            _buildConsoleButton('Y', Colors.green),
-          ],
-        ),
-      ],
-    );
-  }
-
-  Widget _buildConsoleButton(String label, Color color) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final buttonSize =
-        screenWidth > 1200 ? 38.0 : 32.0; // Maior em telas grandes
-
-    return Container(
-      width: buttonSize,
-      height: buttonSize,
-      decoration: BoxDecoration(
-        color: color,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: AppTheme.darkBorderColor,
-          width: 2,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.3),
-            blurRadius: 3,
-            offset: const Offset(0, 3),
-          ),
-        ],
-      ),
-      child: Center(
-        child: Text(
-          label,
-          style: AppTheme.bodySmall.copyWith(
-            color: AppTheme.darkTextPrimaryColor,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildFullscreenSnakeGame() {
-    return KeyboardListener(
-      focusNode: FocusNode(),
-      autofocus: true,
-      onKeyEvent: (KeyEvent event) {
-        if (event is KeyDownEvent) {
-          if (event.logicalKey == LogicalKeyboardKey.arrowUp ||
-              event.logicalKey == LogicalKeyboardKey.keyW) {
-            _moveUp();
-          } else if (event.logicalKey == LogicalKeyboardKey.arrowDown ||
-              event.logicalKey == LogicalKeyboardKey.keyS) {
-            _moveDown();
-          } else if (event.logicalKey == LogicalKeyboardKey.arrowLeft ||
-              event.logicalKey == LogicalKeyboardKey.keyA) {
-            _moveLeft();
-          } else if (event.logicalKey == LogicalKeyboardKey.arrowRight ||
-              event.logicalKey == LogicalKeyboardKey.keyD) {
-            _moveRight();
-          } else if (event.logicalKey == LogicalKeyboardKey.escape) {
-            // ESC para voltar
-            if (mounted) {
-              setState(() {
-                _mostrarCarregamento = false;
-                _mostrarTelaInicial = true;
-                _gameRunning = false;
-                _snakeController.stop();
-              });
-            }
-          }
-        }
-      },
-      child: Scaffold(
-        backgroundColor: AppTheme.darkBackgroundColor,
-        body: Stack(
-          children: [
-            // Jogo da cobrinha centralizado
-            Center(
-              child: Container(
-                width: double.infinity,
-                height: double.infinity,
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [
-                      AppTheme.darkBackgroundColor,
-                      AppTheme.darkSurfaceColor.withValues(alpha: 0.3),
-                    ],
-                  ),
-                ),
-                child: Center(
-                  child: AspectRatio(
-                    aspectRatio: 1.0, // Área quadrada para o jogo
-                    child: GestureDetector(
-                      onTap: () {
-                        if (mounted) {
-                          setState(() {
-                            _snakeClickCount++;
-                            if (_snakeClickCount >= 3) {
-                              Navigator.of(context).pushReplacement(
-                                MaterialPageRoute(
-                                  builder: (context) => QuizSnakeScreen(
-                                    topico: widget.topico,
-                                    dificuldade: widget.dificuldade,
-                                  ),
-                                ),
-                              );
-                            }
-                          });
-                        }
-                      },
-                      child: Container(
-                        margin: const EdgeInsets.all(40),
-                        decoration: BoxDecoration(
-                          color:
-                              AppTheme.darkSurfaceColor.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(
-                            color: AppTheme.primaryColor.withValues(alpha: 0.3),
-                            width: 2,
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color:
-                                  AppTheme.primaryColor.withValues(alpha: 0.1),
-                              blurRadius: 20,
-                              spreadRadius: 5,
-                            ),
-                          ],
-                        ),
-                        child: LayoutBuilder(
-                          builder: (context, constraints) {
-                            final gameSize =
-                                constraints.maxWidth < constraints.maxHeight
-                                    ? constraints.maxWidth
-                                    : constraints.maxHeight;
-                            _gridSize =
-                                30; // Grid fixo maior para telas grandes
-                            _cellSize = gameSize / _gridSize;
-
-                            return CustomPaint(
-                              painter: SnakePainter(
-                                snakeSegments: _snakeSegments,
-                                foodPosition: _foodPosition,
-                                cellSize: _cellSize,
-                                enemySnakes: _enemySnakes,
-                                enemyColors: _enemyColors,
-                                gridSize: _gridSize,
-                              ),
-                              child: Container(),
-                            );
-                          },
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-
-            // HUD com informações no canto superior esquerdo
-            Positioned(
-              top: 20,
-              left: 20,
-              child: Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: AppTheme.darkSurfaceColor.withValues(alpha: 0.9),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: AppTheme.darkBorderColor,
-                    width: 2,
-                  ),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Preparando Quiz...',
-                      style: AppTheme.bodyMedium.copyWith(
-                        color: AppTheme.primaryColor,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        Container(
-                          width: 8,
-                          height: 8,
-                          decoration: BoxDecoration(
-                            color: Colors.green,
-                            borderRadius: BorderRadius.circular(4),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.green.withValues(alpha: 0.6),
-                                blurRadius: 4,
-                                spreadRadius: 1,
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          '${_snakeSegments.length} segmentos',
-                          style: AppTheme.bodySmall.copyWith(
-                            color: AppTheme.darkTextPrimaryColor,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-
-            // Instruções de controle no canto superior direito
-            Positioned(
-              top: 20,
-              right: 20,
-              child: Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: AppTheme.darkSurfaceColor.withValues(alpha: 0.9),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: AppTheme.darkBorderColor,
-                    width: 2,
-                  ),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      'Controles:',
-                      style: AppTheme.bodySmall.copyWith(
-                        color: AppTheme.primaryColor,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'WASD ou Setas para mover',
-                      style: AppTheme.bodySmall.copyWith(
-                        color: AppTheme.darkTextSecondaryColor,
-                      ),
-                    ),
-                    Text(
-                      'ESC para voltar',
-                      style: AppTheme.bodySmall.copyWith(
-                        color: AppTheme.darkTextSecondaryColor,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
         ),
       ),
     );
@@ -2421,11 +1674,6 @@ class _QuizAlternadoScreenState extends State<QuizAlternadoScreen>
 
             const SizedBox(height: 24),
 
-            // Performance e Dificuldade Adaptiva
-            _buildPerformanceCard(),
-
-            const SizedBox(height: 24),
-
             // Botões de ação
             Row(
               children: [
@@ -2449,29 +1697,8 @@ class _QuizAlternadoScreenState extends State<QuizAlternadoScreen>
                 const SizedBox(width: 16),
                 Expanded(
                   child: ModernButton(
-                    text: 'Voltar ao Início',
-                    onPressed: () {
-                      if (mounted) {
-                        setState(() {
-                          _mostrarTelaInicial = true;
-                          quizFinalizado = false;
-                          perguntaIndex = 0;
-                          pontuacao = 0;
-                          respostas.clear();
-                          estatisticas = {
-                            'corretas': 0,
-                            'incorretas': 0,
-                            'multipla_escolha': 0,
-                            'verdadeiro_falso': 0,
-                            'complete_frase': 0,
-                          };
-                          _perguntasPreCarregadas.clear();
-                          _preCarregamentoAtivo = false;
-                          _gameRunning = false;
-                          _snakeController.stop();
-                        });
-                      }
-                    },
+                    text: 'Voltar',
+                    onPressed: () => Navigator.of(context).pop(),
                     isPrimary: true,
                     icon: Icons.home,
                   ),
@@ -2534,209 +1761,6 @@ class _QuizAlternadoScreenState extends State<QuizAlternadoScreen>
       default:
         return AppTheme.primaryColor;
     }
-  }
-
-  Color _getDificuldadeColor(String dificuldade) {
-    switch (dificuldade.toLowerCase()) {
-      case 'fácil':
-        return AppTheme.successColor;
-      case 'médio':
-        return AppTheme.warningColor;
-      case 'difícil':
-        return AppTheme.errorColor;
-      default:
-        return AppTheme.primaryColor;
-    }
-  }
-
-  IconData _getDificuldadeIcon(String dificuldade) {
-    switch (dificuldade.toLowerCase()) {
-      case 'fácil':
-        return Icons.sentiment_satisfied;
-      case 'médio':
-        return Icons.sentiment_neutral;
-      case 'difícil':
-        return Icons.sentiment_dissatisfied;
-      default:
-        return Icons.help_outline;
-    }
-  }
-
-  Widget _buildPerformanceCard() {
-    return FutureBuilder<Map<String, dynamic>>(
-      future: PerformanceService.obterEstatisticas(),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) {
-          return Container(
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              color: AppTheme.darkSurfaceColor,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: AppTheme.darkBorderColor),
-            ),
-            child: const Center(child: CircularProgressIndicator()),
-          );
-        }
-
-        final stats = snapshot.data!;
-        final taxaAcertoGeral = stats['taxa_acerto_geral'] ?? 0.0;
-        final taxaAcertoRecente = stats['taxa_acerto_recente'] ?? 0.0;
-        final sequenciaAcertos = stats['sequencia_acertos'] ?? 0;
-        final sequenciaErros = stats['sequencia_erros'] ?? 0;
-        final dificuldadeAtual = stats['dificuldade_atual'] ?? 'fácil';
-
-        return Container(
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            color: AppTheme.darkSurfaceColor,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: AppTheme.darkBorderColor),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(
-                    Icons.trending_up,
-                    color: AppTheme.primaryColor,
-                    size: 24,
-                  ),
-                  const SizedBox(width: 12),
-                  Text(
-                    'Performance Adaptiva',
-                    style: AppTheme.bodyLarge.copyWith(
-                      color: AppTheme.darkTextPrimaryColor,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-
-              // Taxa de acerto geral
-              _buildPerformanceItem(
-                'Taxa de Acerto Geral',
-                '${taxaAcertoGeral.toStringAsFixed(1)}%',
-                Icons.analytics,
-                _getPerformanceColor(taxaAcertoGeral),
-              ),
-
-              // Taxa de acerto recente
-              _buildPerformanceItem(
-                'Performance Recente',
-                '${taxaAcertoRecente.toStringAsFixed(1)}%',
-                Icons.timeline,
-                _getPerformanceColor(taxaAcertoRecente),
-              ),
-
-              // Sequência atual
-              if (sequenciaAcertos > 0)
-                _buildPerformanceItem(
-                  'Sequência de Acertos',
-                  '$sequenciaAcertos',
-                  Icons.local_fire_department,
-                  AppTheme.successColor,
-                )
-              else if (sequenciaErros > 0)
-                _buildPerformanceItem(
-                  'Sequência de Erros',
-                  '$sequenciaErros',
-                  Icons.warning,
-                  AppTheme.errorColor,
-                ),
-
-              Divider(color: AppTheme.darkBorderColor, height: 32),
-
-              // Dificuldade atual
-              Row(
-                children: [
-                  Icon(
-                    _getDificuldadeIcon(dificuldadeAtual),
-                    color: _getDificuldadeColor(dificuldadeAtual),
-                    size: 20,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      'Dificuldade Atual',
-                      style: AppTheme.bodyMedium.copyWith(
-                        color: AppTheme.darkTextPrimaryColor,
-                      ),
-                    ),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: _getDificuldadeColor(dificuldadeAtual)
-                          .withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: _getDificuldadeColor(dificuldadeAtual)
-                            .withValues(alpha: 0.3),
-                      ),
-                    ),
-                    child: Text(
-                      dificuldadeAtual.toUpperCase(),
-                      style: AppTheme.bodySmall.copyWith(
-                        color: _getDificuldadeColor(dificuldadeAtual),
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-
-              const SizedBox(height: 12),
-              Text(
-                'A dificuldade se ajusta automaticamente baseada na sua performance para otimizar o aprendizado.',
-                style: AppTheme.bodySmall.copyWith(
-                  color: AppTheme.darkTextSecondaryColor,
-                  fontStyle: FontStyle.italic,
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildPerformanceItem(
-      String titulo, String valor, IconData icon, Color cor) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
-        children: [
-          Icon(icon, color: cor, size: 20),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              titulo,
-              style: AppTheme.bodyMedium.copyWith(
-                color: AppTheme.darkTextPrimaryColor,
-              ),
-            ),
-          ),
-          Text(
-            valor,
-            style: AppTheme.bodyMedium.copyWith(
-              color: cor,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Color _getPerformanceColor(double taxa) {
-    if (taxa >= 70) return AppTheme.successColor;
-    if (taxa >= 50) return AppTheme.warningColor;
-    return AppTheme.errorColor;
   }
 
   Widget _buildEstatisticaItem(
